@@ -1,4 +1,4 @@
-/*The structure of this CUDA program is specifically designed for development on cloud-based platforms like Google Colab. 
+/*The structure of this CUDA program is specifically designed for development on cloud-based platforms like Google Colab.
 The streamlined code structure, avoiding traditional `.cuh` and `.cu` files and `CMake`, is more practical for these environments,
  focusing on ease of use and efficiency in building and executing the program.
 */
@@ -10,7 +10,7 @@ The streamlined code structure, avoiding traditional `.cuh` and `.cu` files and 
 #include <cmath>
 #include <ctime>
 
-/* 
+/*
 
 This CUDA program is designed with flexibility in mind, allowing for key parameters to be adjusted according to the specific requirements of the simulation.
  The primary configurable parameters include:
@@ -25,11 +25,11 @@ IT (Number of Iterations): Defines the total number of iterations for the simula
 
 Performance and Convergence Guidelines
 
-Thread Count and Lattice Size: It's recommended that L be divisible by NTHREADS to ensure efficient workload distribution and to avoid indexing issues. 
+Thread Count and Lattice Size: It's recommended that L be divisible by NTHREADS to ensure efficient workload distribution and to avoid indexing issues.
 If you modify L, adjust NTHREADS accordingly to maintain this divisibility.
 
 Optimal Settings: The program was tested with L = 256, IT = 2e9, and NTHREADS = 256. These settings are known to provide a high confidence of convergence in simulations.
-Adjusting for Larger Lattices: If you choose to increase L, be mindful that it might require a proportional adjustment in NTHREADS and IT depending on your GPU capabilities. 
+Adjusting for Larger Lattices: If you choose to increase L, be mindful that it might require a proportional adjustment in NTHREADS and IT depending on your GPU capabilities.
 A larger L generally necessitates more iterations to ensure convergence, and the thread count may need to be modified to maintain optimal performance.
 
 
@@ -39,7 +39,7 @@ A larger L generally necessitates more iterations to ensure convergence, and the
 #define L 256
 #define N (L*L)
 #define J 1.00
-#define IT 5e8 // Number of iterations, should be divisible by 2 for even updates
+#define IT 2e9 // Number of iterations, should be divisible by 2 for even updates
 #define NTHREADS 128 // Number of GPU threads
 
 __device__ int get_index(int row, int col);
@@ -47,10 +47,18 @@ __device__ int delta_energy(bool* lattice, int r, int c);
 __global__ void flip_spins(bool* lattice, float* prob, float* energy, curandState* states, bool update_black);
 __global__ void setup_rand_kernel(curandState* state, unsigned long seed);
 __global__ void initialize_lattice_kernel(bool* lattice, curandState* states);
+__global__ void calculate_magnetization_kernel(bool* lattice, float* magnetization);
+
 
 int main() {
     bool* dev_lattice;
     cudaMalloc((void**)&dev_lattice, N * sizeof(bool));
+
+    float* dev_energy;
+    cudaMalloc((void**)&dev_energy, sizeof(float));
+
+    float* dev_magnetization;
+    cudaMalloc((void**)&dev_magnetization, sizeof(float));
 
     curandState* dev_states;
     cudaMalloc((void**)&dev_states, N * sizeof(curandState));
@@ -59,15 +67,9 @@ int main() {
     dim3 threadsPerBlock(NTHREADS, 1, 1);
 
     unsigned long seed = static_cast<unsigned long>(time(nullptr));
-    setup_rand_kernel << <blocksPerGrid, threadsPerBlock >> > (dev_states, seed);
+    setup_rand_kernel << < blocksPerGrid, threadsPerBlock >> > (dev_states, seed);
 
-    float* dev_energy;
-    cudaMalloc((void**)&dev_energy, sizeof(float));
-
-    float energy = 0.0f;
-    cudaMemcpy(dev_energy, &energy, sizeof(float), cudaMemcpyHostToDevice);
-
-    initialize_lattice_kernel << <blocksPerGrid, threadsPerBlock >> > (dev_lattice, dev_states);
+    initialize_lattice_kernel << < blocksPerGrid, threadsPerBlock >> > (dev_lattice, dev_states);
 
     float* dev_probabilities;
     cudaMalloc((void**)&dev_probabilities, 2 * sizeof(float));
@@ -75,30 +77,39 @@ int main() {
     for (float T = 0.2f; T <= 3.0f; T += 0.1f) {
         clock_t start_time = clock();
 
+        float energy = 0.0f;
+        cudaMemcpy(dev_energy, &energy, sizeof(float), cudaMemcpyHostToDevice);
+
+        float magnetization = 0.0f;
+        cudaMemcpy(dev_magnetization, &magnetization, sizeof(float), cudaMemcpyHostToDevice);
+
         float prob[2] = { exp(-4 * J / T), exp(-8 * J / T) };
         cudaMemcpy(dev_probabilities, prob, 2 * sizeof(float), cudaMemcpyHostToDevice);
 
         for (unsigned long i = 0; i < IT / N; i += 2) {
-            flip_spins << <blocksPerGrid, threadsPerBlock >> > (dev_lattice, dev_probabilities, dev_energy, dev_states, true);
-            flip_spins << <blocksPerGrid, threadsPerBlock >> > (dev_lattice, dev_probabilities, dev_energy, dev_states, false);
+            flip_spins << < blocksPerGrid, threadsPerBlock >> > (dev_lattice, dev_probabilities, dev_energy, dev_states, true);
+            flip_spins << < blocksPerGrid, threadsPerBlock >> > (dev_lattice, dev_probabilities, dev_energy, dev_states, false);
         }
 
+        calculate_magnetization_kernel << < blocksPerGrid, threadsPerBlock >> > (dev_lattice, dev_magnetization);
         cudaDeviceSynchronize();
 
-        clock_t end_time = clock();
+        cudaMemcpy(&energy, dev_energy, sizeof(float), cudaMemcpyDeviceToHost);
+        cudaMemcpy(&magnetization, dev_magnetization, sizeof(float), cudaMemcpyDeviceToHost);
+        magnetization /= N;
 
+        clock_t end_time = clock();
         double elapsed_secs = static_cast<double>(end_time - start_time) / CLOCKS_PER_SEC;
 
-        cudaMemcpy(&energy, dev_energy, sizeof(float), cudaMemcpyDeviceToHost);
-
         std::cout << "Temperature: " << T << std::endl;
-        std::cout << "Final Energy: " << energy / N << std::endl;
+        std::cout << "Magnetization per site: " << abs(magnetization) << std::endl;
         std::cout << "Simulation time (seconds): " << elapsed_secs << std::endl << std::endl;
     }
 
     cudaFree(dev_lattice);
-    cudaFree(dev_states);
     cudaFree(dev_energy);
+    cudaFree(dev_magnetization);
+    cudaFree(dev_states);
     cudaFree(dev_probabilities);
 
     return 0;
@@ -154,5 +165,13 @@ __global__ void setup_rand_kernel(curandState* state, unsigned long seed) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < N) {
         curand_init(seed, idx, 0, &state[idx]);
+    }
+}
+
+__global__ void calculate_magnetization_kernel(bool* lattice, float* magnetization) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < N) {
+        int spin = lattice[idx] ? 1 : -1; // Convert boolean to +1 or -1
+        atomicAdd(magnetization, spin);   // Add the spin to the total magnetization
     }
 }
