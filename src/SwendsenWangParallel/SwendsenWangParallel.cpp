@@ -166,18 +166,21 @@ void SwendsenWangParallel::simulate_step(std::vector<int>& lattice, float P, std
         }
     }
 
-    // Determine flip decisions (Single-threaded)
     std::vector<int> flip_decision(N);
-    std::mt19937 rng; // Non-thread local RNG for single-threaded operation
-    std::uniform_int_distribution<int> dist(0, 1);
-    for (int i = 0; i < N; ++i) {
-        flip_decision[i] = dist(rng);
-    }
+    #pragma omp parallel
+    {
+        std::mt19937 rng(omp_get_thread_num()); // Thread-local RNG
+        std::uniform_int_distribution<int> dist(0, 1);
+        #pragma omp for
+        for (int i = 0; i < N; ++i) {
+            flip_decision[i] = dist(rng);
+        }
 
-    // Flip clusters (Single-threaded)
-    for (int i = 0; i < N; ++i) {
-        if (flip_decision[find_set(i, parent)]) {
-            lattice[i] *= -1;
+        #pragma omp for
+        for (int i = 0; i < N; ++i) {
+            if (flip_decision[find_set(i, parent)]) {
+                lattice[i] *= -1;
+            }
         }
     }
 }
