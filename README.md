@@ -34,6 +34,15 @@ make
 ./SWprogram
 make clean
 ```
+
+or 
+```bash
+cd src/SwendsenWangParallelFast
+make
+./SWprogram
+make clean
+```
+
 **For the Rem (Replica Exchange Method) Program**
 The REM Program has been tested for simulating 2 replicas across two processes. Tailor the `mpirun` command for your system, adjusting `--map-by` to 'socket' or 'node' based on your hardware configuration.
 
