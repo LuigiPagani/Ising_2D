@@ -21,7 +21,7 @@ This project implements the 2D-Ising model simulation using C++ and offers paral
 
 **For the Wolff program**
 ```bash
-cd Test/Wolff
+cd src/Wolff
 make
 ./Wprogram
 make clean
@@ -29,7 +29,7 @@ make clean
 
 **For the SwendsenWangParallel program**
 ```bash
-cd Test/SwendsenWangParallel
+cd src/SwendsenWangParallel
 make
 ./SWprogram
 make clean
@@ -38,7 +38,7 @@ make clean
 The REM Program has been tested for simulating 2 replicas across two processes. Tailor the `mpirun` command for your system, adjusting `--map-by` to 'socket' or 'node' based on your hardware configuration.
 
 ```bash
-cd Test/Rem
+cd src/Rem
 make
 mpirun -np 2 ./REMprogram
 make clean
